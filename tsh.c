@@ -200,7 +200,7 @@ if(!built_in){
 	}
 	}
 	sigprocmask(SIG_UNBLOCK,&mask,NULL);
-	//if not background, wait
+	//if not background, wait//github push
 	if(!bg){
 	 waitfg(fgpid(jobs));
 	}
