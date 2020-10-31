@@ -18,7 +18,6 @@
 #define MAXARGS     128   /* max args on a command line */
 #define MAXJOBS      16   /* max jobs at any point in time */
 #define MAXJID    1<<16   /* max job ID */
-
 /* Job states */
 #define UNDEF 0 /* undefined */
 #define FG 1    /* running in foreground */
@@ -165,6 +164,51 @@ int main(int argc, char **argv)
 */
 void eval(char *cmdline) 
 {
+char *argv[MAXARGS];
+int bg;
+pid_t pid;
+int status;
+sigset_t mask;
+int built_in;
+
+bg = parseline(cmdline,argv);
+built_in = builtin_cmd(argv);
+
+if(!built_in){
+	sigemptyset(&mask);
+	sigaddset(&mask,SIGCHLD);
+	sigprocmask(SIG_BLOCK,&mask,NULL);
+
+	if ((pid = fork()) == 0){
+		setpgid(0,0);
+		sigprocmask(SIG_UNBLOCK,&mask,NULL);
+		execve(argv[0],argv,environ);
+	} 
+	
+	if(!bg){
+	addjob(jobs,pid,1,cmdline);
+	}
+
+	else if (bg){
+	addjob(jobs,pid,2,cmdline);
+	int i = 0;
+	while (i < MAXJOBS){
+		if (jobs[i].state == 2){
+		printf("[%d] (%d) %s",jobs[i].jid, jobs[i].pid, jobs[i].cmdline);
+		}
+	++i;
+	}
+	}
+	sigprocmask(SIG_UNBLOCK,&mask,NULL);
+	
+	if(!bg){
+	 waitfg(fgpid(jobs));
+
+	}
+
+}
+
+
     return;
 }
 
@@ -231,14 +275,75 @@ int parseline(const char *cmdline, char **argv)
  */
 int builtin_cmd(char **argv) 
 {
+
+if(strcmp(argv[0],"quit") == 0){
+exit(0);
+return 1;
+}
+else if(strcmp(argv[0],"bg") == 0){
+do_bgfg(argv);
+return 1;
+}
+else if (strcmp(argv[0],"fg") == 0){
+do_bgfg(argv);
+return 1;
+}
+else if (strcmp(argv[0],"jobs") == 0){
+listjobs(jobs);
+return 1;
+}
     return 0;     /* not a builtin command */
 }
 
 /* 
  * do_bgfg - Execute the builtin bg and fg commands
  */
-void do_bgfg(char **argv) 
-{
+void do_bgfg(char **argv){ 
+char *s;
+char *s1;
+int x;
+int mod = 0;
+//bg
+if (strcmp(argv[0],"bg") == 0){
+	if (argv[1][0] == '%'){
+	x = atoi(&argv[1][1]);
+	mod = 1;
+	}
+	else {
+	x = atoi(argv[1]);
+	}
+int i = 0;
+while (i < MAXJOBS){
+	if (mod == 1 && jobs[i].jid == x){
+	jobs[i].state = 2;
+	}
+	else if (mod == 0 && jobs[i].pid == x){
+	jobs[i].state = 2;
+	}
+++i;
+}
+}
+
+//fg
+if (strcmp(argv[0],"fg") == 0){
+	if (argv[1][0] == '%'){
+	x = atoi(&argv[1][1]);
+	mod = 1;
+	}
+	else{
+	x = atoi(argv[1]);
+	}
+int i = 0;
+while (i < MAXJOBS){
+	if (mod == 1 && jobs[i].jid == x){
+	jobs[i].state = 1;
+	}
+	else if (mod == 0 && jobs[i].pid == x){
+	jobs[i].state = 1;
+	}
+++i;
+}
+}
     return;
 }
 
@@ -247,6 +352,16 @@ void do_bgfg(char **argv)
  */
 void waitfg(pid_t pid)
 {
+struct job_t *j;
+j = getjobpid(jobs,pid);
+
+printf("job id: %d",j->pid);
+
+if (j->pid == 0 || j->pid == NULL){ return;}
+
+while (j->pid == pid && j->state == 1){
+sleep(1);
+}
     return;
 }
 
@@ -263,6 +378,10 @@ void waitfg(pid_t pid)
  */
 void sigchld_handler(int sig) 
 {
+int status;
+pid_t pid = wait(&status);
+
+
     return;
 }
 
@@ -273,6 +392,10 @@ void sigchld_handler(int sig)
  */
 void sigint_handler(int sig) 
 {
+int  i = 0;
+pid_t pid;
+pid = fgpid(jobs);
+kill(-pid,SIGINT);
     return;
 }
 
@@ -283,6 +406,11 @@ void sigint_handler(int sig)
  */
 void sigtstp_handler(int sig) 
 {
+int i = 0;
+pid_t pid;
+pid = fgpid(jobs);
+kill(-pid,SIGTSTP);
+
     return;
 }
 
